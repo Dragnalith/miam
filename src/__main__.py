@@ -7,12 +7,14 @@ APP_HEIGHT = 720
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 RED = (255, 0, 0)
-GREEN = (0, 255, 0)
+GREEN = (0, 190, 0)
 BLUE = (0, 0, 255)
 YELLOW = (255, 255, 0)
-GRAY = (200, 200, 000)
+GRAY = (200, 200, 200)
 FONT_SIZE = 16
 PADDING = 8
+BUTTON_WIDTH = 64
+BUTTON_HEIGHT = 32
 
 class Entity:
     def __init__(self) -> None:
@@ -43,6 +45,7 @@ class World:
     def __init__(self, size_x: int, size_y: int) -> None:
         self.size_x = size_x
         self.size_y = size_y
+        self.selected = None
         self._stacks : list[list[EntityStack]] = [[EntityStack() for _ in range(self.size_y)] for _ in range(self.size_x)]
 
     def _get_stack(self, x: int, y: int) -> EntityStack:
@@ -50,6 +53,16 @@ class World:
         assert 0 <= y and y < self.size_y
 
         return self._stacks[x][y]
+    
+
+    def select(self, x: int, y: int) -> None:
+        self.selected = (x, y)
+
+    def unselect(self) -> None:
+        self.selected = None
+
+    def get_selection(self) -> Optional[Tuple[int, int]]:
+        return self.selected
 
     def get_size(self) -> Tuple[int, int]:
         return (self.size_x, self.size_y)
@@ -121,7 +134,16 @@ class Grid:
 
 class Game:
     @staticmethod
-    def do_action(x: int, y: int, world: World) -> bool:
+    def do_action(world: World, x: int, y: int) -> bool:
+        raise NotImplementedError("Implement 'do_action' method")
+
+    @staticmethod
+    def select(world: World, x: int, y: int) -> bool:
+        raise NotImplementedError("Implement 'do_action' method")
+    
+    
+    @staticmethod
+    def unselect(world: World) -> bool:
         raise NotImplementedError("Implement 'do_action' method")
     
     @staticmethod
@@ -133,9 +155,27 @@ class GameOfLife(Game):
     def do_action(world: World, x: int, y: int) -> bool:
         if world.is_empty(x, y):
             entity = Entity()
-            entity.color = WHITE
+            entity.color = (139, 99, 49)
             world.push(x, y, entity)
+        else:
+            world.pop(x, y)
+            if world.get_selection() == (x, y):
+                world.unselect()
 
+        return True
+    
+    @staticmethod
+    def select(world: World, x: int, y: int) -> bool:
+        if not world.is_empty(x, y):
+            world.select(x, y)
+            return True
+        else:
+            world.unselect()
+            return False
+
+    @staticmethod
+    def unselect(world: World) -> bool:
+        world.unselect()
         return True
     
     @staticmethod
@@ -149,30 +189,43 @@ window_surface = pygame.display.set_mode((1280, 720), vsync=1)
 manager = pygame_gui.UIManager((1280,720))
 font = pygame.font.SysFont(None, FONT_SIZE)
 
-close_button_rect = pygame.Rect(0, 0, 64, 32)
-close_button_rect.right = APP_WIDTH - 8
-close_button_rect.top = 8
+close_button_rect = pygame.Rect(0, 0, BUTTON_WIDTH, BUTTON_HEIGHT)
+close_button_rect.right = APP_WIDTH - PADDING
+close_button_rect.top = PADDING
 close_button = pygame_gui.elements.UIButton(relative_rect=close_button_rect, text='Close', manager=manager)
+
+step_button_rect = pygame.Rect(0, 0, BUTTON_WIDTH, BUTTON_HEIGHT)
+step_button_rect.left = PADDING
+step_button_rect.top = PADDING
+step_button = pygame_gui.elements.UIButton(relative_rect=step_button_rect, text='Step', manager=manager)
+
+play_button_rect = pygame.Rect(0, 0, BUTTON_WIDTH, BUTTON_HEIGHT)
+play_button_rect.left = PADDING + 64 + PADDING
+play_button_rect.top = PADDING
+play_button = pygame_gui.elements.UIButton(relative_rect=play_button_rect, text='Play', manager=manager)
 
 clock = pygame.time.Clock()
 is_running = True
 
 world : World = World(16, 16)
 game : Game = GameOfLife()
-selected_cell : Tuple[int, int]= None
-    
+is_playing = False
+
 while is_running:
     time_delta = clock.tick() / 1000.0
+    manager.update(time_delta)
+    mouse_x, mouse_y = mouse_pos = pygame.mouse.get_pos()
 
     is_mouse_select = False
     is_mouse_action = False
+    is_any_button_pressed = False
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             is_running = False
 
         if event.type == pygame.KEYUP:
             if event.key == pygame.K_ESCAPE:
-                selected_cell = None
+                game.unselect(world)
         if event.type == pygame.MOUSEBUTTONUP:
             if event.button == 1:
                 is_mouse_select = True
@@ -182,22 +235,43 @@ while is_running:
 
         manager.process_events(event)
 
+    if step_button_rect.collidepoint(mouse_pos) or play_button_rect.collidepoint(mouse_pos) or close_button_rect.collidepoint(mouse_pos):
+        is_mouse_action = False
+        is_mouse_select = False
+
     if close_button.pressed:
         is_running = False
 
-    grid = Grid(world.get_size(), 32)
-    grid.set_offset(PADDING, PADDING)
+    if play_button.pressed:
+        if is_playing:
+            is_playing = False
+            play_button.set_text("Play")
+        else:
+            is_playing = True
+            play_button.set_text("Stop")
 
-    manager.update(time_delta)
-    mouse_x, mouse_y = mouse_pos = pygame.mouse.get_pos()    
+    grid = Grid(world.get_size(), 32)
+    grid.set_offset(PADDING, PADDING + BUTTON_HEIGHT + PADDING)
+    
     hit_cell = grid.hit_test(mouse_pos)      
 
     if is_mouse_select:
-        selected_cell = hit_cell
+        if hit_cell is not None:
+            hit_x, hit_y = hit_cell
+            game.select(world, hit_x, hit_y)
+        else:
+            game.unselect(world)
 
     if is_mouse_action:
-        hit_x, hit_y = hit_cell
-        game.do_action(world, hit_x, hit_y)
+        if hit_cell is not None:
+            hit_x, hit_y = hit_cell
+            game.do_action(world, hit_x, hit_y)
+
+    if not is_playing and step_button.pressed:
+        game.do_pass(world)
+
+    if is_playing:
+        game.do_pass(world)
 
     window_surface.fill(BLACK)
     grid.draw(window_surface)
@@ -211,8 +285,9 @@ while is_running:
             rect.height -= 1
             pygame.draw.rect(window_surface, entity.color, rect)
 
+    selected_cell = world.get_selection()
     if selected_cell is not None:
-        grid.draw_cell_highlight(selected_cell, YELLOW, width=3)
+        grid.draw_cell_highlight(selected_cell, GREEN, width=3)
 
     if hit_cell is not None:
         grid.draw_cell_highlight(hit_cell, RED)

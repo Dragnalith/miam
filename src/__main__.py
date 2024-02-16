@@ -1,6 +1,7 @@
 import pygame
 import pygame_gui
 from typing import Optional, Iterator, Tuple
+import copy
 
 APP_WIDTH = 1280
 APP_HEIGHT = 720
@@ -52,8 +53,10 @@ class World:
         assert 0 <= x and x < self.size_x
         assert 0 <= y and y < self.size_y
 
-        return self._stacks[x][y]
-    
+        return self._stacks[x][y]     
+
+    def is_valid_cell(self, x: int, y: int) -> bool:
+        return 0 <= x and x < self.size_x and 0 <= y and y < self.size_y
 
     def select(self, x: int, y: int) -> None:
         self.selected = (x, y)
@@ -151,16 +154,26 @@ class Game:
         raise NotImplementedError("Implement 'do_action' method")
 
 class GameOfLife(Game):
+    @classmethod
+    def _create_cell(cls, world: World, x: int, y: int) -> None:
+        assert world.is_empty(x, y)
+        entity = Entity()
+        entity.color = (139, 99, 49)
+        world.push(x, y, entity)
+
+    @classmethod
+    def _kill_cell(cls, world: World, x: int, y: int) -> bool:
+        assert not world.is_empty(x, y)
+        world.pop(x, y)
+        if world.get_selection() == (x, y):
+            world.unselect()
+
     @staticmethod
     def do_action(world: World, x: int, y: int) -> bool:
         if world.is_empty(x, y):
-            entity = Entity()
-            entity.color = (139, 99, 49)
-            world.push(x, y, entity)
+            GameOfLife._create_cell(world, x, y)
         else:
-            world.pop(x, y)
-            if world.get_selection() == (x, y):
-                world.unselect()
+            GameOfLife._kill_cell(world, x, y)
 
         return True
     
@@ -180,6 +193,21 @@ class GameOfLife(Game):
     
     @staticmethod
     def do_pass(world: World) -> bool:
+        world_copy = copy.deepcopy(world)
+
+        for x, y in world.iter():
+            alive = not world_copy.is_empty(x, y)
+            neighbor_count = 0
+            for i in range(x-1,x+2):
+                for j in range(y-1,y+2):
+                    if world_copy.is_valid_cell(i, j) and (i != x or j != y) and not world_copy.is_empty(i, j):
+                        neighbor_count += 1
+
+            if alive and (neighbor_count < 2 or neighbor_count > 3):
+                GameOfLife._kill_cell(world, x, y)
+            if not alive and neighbor_count == 3:
+                GameOfLife._create_cell(world, x, y)
+
         return True
     
 pygame.init()
@@ -188,6 +216,7 @@ pygame.display.set_caption('Miam')
 window_surface = pygame.display.set_mode((1280, 720), vsync=1)
 manager = pygame_gui.UIManager((1280,720))
 font = pygame.font.SysFont(None, FONT_SIZE)
+font_menu = pygame.font.SysFont(None, 24)
 
 close_button_rect = pygame.Rect(0, 0, BUTTON_WIDTH, BUTTON_HEIGHT)
 close_button_rect.right = APP_WIDTH - PADDING
@@ -204,12 +233,19 @@ play_button_rect.left = PADDING + 64 + PADDING
 play_button_rect.top = PADDING
 play_button = pygame_gui.elements.UIButton(relative_rect=play_button_rect, text='Play', manager=manager)
 
+step_rate_slider_rect = pygame.Rect(0, 0, 2 * BUTTON_WIDTH, BUTTON_HEIGHT)
+step_rate_slider_rect.left = PADDING + BUTTON_WIDTH + PADDING + BUTTON_WIDTH + PADDING
+step_rate_slider_rect.top = PADDING
+step_rate_slider = pygame_gui.elements.UIHorizontalSlider(step_rate_slider_rect, 30, (1, 120), manager=manager)
+
 clock = pygame.time.Clock()
 is_running = True
 
-world : World = World(16, 16)
+tile_size = 16
+world : World = World(32, 32)
 game : Game = GameOfLife()
 is_playing = False
+is_playing_count = 0
 
 while is_running:
     time_delta = clock.tick() / 1000.0
@@ -250,7 +286,7 @@ while is_running:
             is_playing = True
             play_button.set_text("Stop")
 
-    grid = Grid(world.get_size(), 32)
+    grid = Grid(world.get_size(), tile_size)
     grid.set_offset(PADDING, PADDING + BUTTON_HEIGHT + PADDING)
     
     hit_cell = grid.hit_test(mouse_pos)      
@@ -271,7 +307,11 @@ while is_running:
         game.do_pass(world)
 
     if is_playing:
-        game.do_pass(world)
+        rate = step_rate_slider.get_current_value()
+        if is_playing_count == 0:
+            game.do_pass(world)
+        is_playing_count += 1
+        is_playing_count %= rate
 
     window_surface.fill(BLACK)
     grid.draw(window_surface)
@@ -296,6 +336,10 @@ while is_running:
         text_surface = font.render("Mouse: x = {}, y = {}".format(mouse_x, mouse_y), True, WHITE)
         text_rect = text_surface.get_rect(left=PADDING, bottom=APP_HEIGHT - PADDING)
         window_surface.blit(text_surface, text_rect)
+
+    text_surface = font_menu.render("1 step every {} frame.".format(step_rate_slider.get_current_value()), True, WHITE)
+    text_rect = text_surface.get_rect(left=PADDING + BUTTON_WIDTH + PADDING + BUTTON_WIDTH + PADDING + 2 * BUTTON_WIDTH + PADDING, top=PADDING)
+    window_surface.blit(text_surface, text_rect)
 
     manager.draw_ui(window_surface)
 

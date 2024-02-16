@@ -1,7 +1,11 @@
 import pygame
 import pygame_gui
 from typing import Optional, Iterator, Tuple
-import copy
+import importlib
+import pathlib
+import sys
+
+from miam import Game, World, Entity
 
 APP_WIDTH = 1280
 APP_HEIGHT = 720
@@ -14,81 +18,31 @@ YELLOW = (255, 255, 0)
 GRAY = (200, 200, 200)
 FONT_SIZE = 16
 PADDING = 8
-BUTTON_WIDTH = 64
+BUTTON_WIDTH = 75
 BUTTON_HEIGHT = 32
 
-class Entity:
-    def __init__(self) -> None:
-        pass
-
-class EntityStack:
-    def __init__(self) -> None:
-        self._stack : list[Entity] = []
-
-    def push(self, entity: Entity) -> None:
-        self._stack.append(entity)
-
-    def is_empty(self) -> bool:
-        return len(self._stack) == 0
-
-    def head(self) -> Entity:
-        assert not self.is_empty()
-        return self._stack[-1]
+class DefaultGame(Game):
+    @staticmethod
+    def do_action(world: World, x: int, y: int) -> bool:
+        return True
     
-    def pop(self) -> Entity:
-        assert not self.is_empty()
-        return self._stack.pop()
+    @staticmethod
+    def select(world: World, x: int, y: int) -> bool:
+        world.select(x, y)
+        return True
     
-    def iter(self) -> Iterator[Entity]:
-        iter(self._stack)
-
-class World:
-    def __init__(self, size_x: int, size_y: int) -> None:
-        self.size_x = size_x
-        self.size_y = size_y
-        self.selected = None
-        self._stacks : list[list[EntityStack]] = [[EntityStack() for _ in range(self.size_y)] for _ in range(self.size_x)]
-
-    def _get_stack(self, x: int, y: int) -> EntityStack:
-        assert 0 <= x and x < self.size_x
-        assert 0 <= y and y < self.size_y
-
-        return self._stacks[x][y]     
-
-    def is_valid_cell(self, x: int, y: int) -> bool:
-        return 0 <= x and x < self.size_x and 0 <= y and y < self.size_y
-
-    def select(self, x: int, y: int) -> None:
-        self.selected = (x, y)
-
-    def unselect(self) -> None:
-        self.selected = None
-
-    def get_selection(self) -> Optional[Tuple[int, int]]:
-        return self.selected
-
-    def get_size(self) -> Tuple[int, int]:
-        return (self.size_x, self.size_y)
-
-    def push(self, x: int, y: int, entity: Entity) -> None:
-        self._get_stack(x, y).push(entity)
-
-    def is_empty(self, x: int, y: int) -> bool:
-        return self._get_stack(x, y).is_empty()
-
-    def head(self, x: int, y: int) -> Entity:
-        return self._get_stack(x, y).head()
+    @staticmethod
+    def unselect(world: World) -> bool:
+        world.unselect()
+        return True
     
-    def pop(self, x: int, y: int) -> Entity:
-        return self._get_stack(x, y).pop()
+    @staticmethod
+    def do_pass(world: World) -> bool:
+        return True
     
-    def iter_cell(self, x: int, y: int) -> Iterator[Entity]:
-        return self._get_stack(x, y).iter()
-    
-    def iter(self) -> Iterator[Tuple[int, int]]:
-        for x in range(self.size_x):
-            for y in range (self.size_y):
-                yield (x, y)
+    @staticmethod
+    def get_world_size() -> Tuple[int, int]:
+        return (24, 24)
 
 class Grid:
     def __init__(self, size: Tuple[int, int], tile_size: int) -> None:
@@ -135,80 +89,7 @@ class Grid:
         else:
             return None
 
-class Game:
-    @staticmethod
-    def do_action(world: World, x: int, y: int) -> bool:
-        raise NotImplementedError("Implement 'do_action' method")
 
-    @staticmethod
-    def select(world: World, x: int, y: int) -> bool:
-        raise NotImplementedError("Implement 'do_action' method")
-    
-    
-    @staticmethod
-    def unselect(world: World) -> bool:
-        raise NotImplementedError("Implement 'do_action' method")
-    
-    @staticmethod
-    def do_pass(world: World) -> bool:
-        raise NotImplementedError("Implement 'do_action' method")
-
-class GameOfLife(Game):
-    @classmethod
-    def _create_cell(cls, world: World, x: int, y: int) -> None:
-        assert world.is_empty(x, y)
-        entity = Entity()
-        entity.color = (139, 99, 49)
-        world.push(x, y, entity)
-
-    @classmethod
-    def _kill_cell(cls, world: World, x: int, y: int) -> bool:
-        assert not world.is_empty(x, y)
-        world.pop(x, y)
-        if world.get_selection() == (x, y):
-            world.unselect()
-
-    @staticmethod
-    def do_action(world: World, x: int, y: int) -> bool:
-        if world.is_empty(x, y):
-            GameOfLife._create_cell(world, x, y)
-        else:
-            GameOfLife._kill_cell(world, x, y)
-
-        return True
-    
-    @staticmethod
-    def select(world: World, x: int, y: int) -> bool:
-        if not world.is_empty(x, y):
-            world.select(x, y)
-            return True
-        else:
-            world.unselect()
-            return False
-
-    @staticmethod
-    def unselect(world: World) -> bool:
-        world.unselect()
-        return True
-    
-    @staticmethod
-    def do_pass(world: World) -> bool:
-        world_copy = copy.deepcopy(world)
-
-        for x, y in world.iter():
-            alive = not world_copy.is_empty(x, y)
-            neighbor_count = 0
-            for i in range(x-1,x+2):
-                for j in range(y-1,y+2):
-                    if world_copy.is_valid_cell(i, j) and (i != x or j != y) and not world_copy.is_empty(i, j):
-                        neighbor_count += 1
-
-            if alive and (neighbor_count < 2 or neighbor_count > 3):
-                GameOfLife._kill_cell(world, x, y)
-            if not alive and neighbor_count == 3:
-                GameOfLife._create_cell(world, x, y)
-
-        return True
     
 pygame.init()
 pygame.display.set_caption('Miam')
@@ -229,7 +110,7 @@ step_button_rect.top = PADDING
 step_button = pygame_gui.elements.UIButton(relative_rect=step_button_rect, text='Step', manager=manager)
 
 play_button_rect = pygame.Rect(0, 0, BUTTON_WIDTH, BUTTON_HEIGHT)
-play_button_rect.left = PADDING + 64 + PADDING
+play_button_rect.left = PADDING + BUTTON_WIDTH + PADDING
 play_button_rect.top = PADDING
 play_button = pygame_gui.elements.UIButton(relative_rect=play_button_rect, text='Play', manager=manager)
 
@@ -241,9 +122,28 @@ step_rate_slider = pygame_gui.elements.UIHorizontalSlider(step_rate_slider_rect,
 clock = pygame.time.Clock()
 is_running = True
 
-tile_size = 16
-world : World = World(32, 32)
-game : Game = GameOfLife()
+if len(sys.argv) > 1:
+    file_path = pathlib.Path(sys.argv[1])
+    if not file_path.is_file():
+        print("The file {} does not exist".format(file_path))
+        sys.exit(-1)
+    module_name = file_path.name
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    create_game = getattr(module, "create_game") 
+
+    game : Game = create_game()
+    print("Load {}".format(file_path))
+else:
+    game : Game = DefaultGame()
+    print("Load default game")
+
+world_x, world_y = game.get_world_size()
+max_height = APP_HEIGHT - 2 *  (PADDING + BUTTON_HEIGHT + PADDING)
+tile_size = int(max_height / world_y)
+world : World = World(world_x, world_x)
+
 is_playing = False
 is_playing_count = 0
 
